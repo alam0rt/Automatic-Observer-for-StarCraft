@@ -1,3 +1,7 @@
 /save_models/
 /data/
 /result/
+/build/
+/result
+*/__pycache__/
+.direnv

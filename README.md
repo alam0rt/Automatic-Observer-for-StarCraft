@@ -10,6 +10,54 @@ Consequently, we show that our automatic observer outperforms both current rule-
 The paper's title is "Learning to automatically spectate games for Esports using object detection mechanism."
 The paper is preprinted at https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4173705
 
+## Replay pipeline (2026)
+
+A rework of the original approach that needs no human camera recordings and no Windows
+tooling. The original 2022 code is unchanged under `src/`.
+
+| Stage | Where | What |
+| --- | --- | --- |
+| Extract | `extractor/` (C++) | Plays `.rep` files headlessly in [OpenBW](https://github.com/OpenBW/openbw) and writes per-frame units, unit events, [BWEM](http://bwem.sourceforge.net/) terrain analysis, and fights with [FAP](https://github.com/N00byEdge/FAP) combat-simulation estimates. Libraries come from [Stardust](https://github.com/bmnielsen/Stardust)'s `3rdparty/`. |
+| Label | `observer/labels.py` | "Where the action is": value actually destroyed in the next few seconds, plus FAP's predicted losses, falling back to army positions when it's quiet. |
+| Model | `observer/model.py` | A small U-Net predicting a heatmap over the map from the last few frames. It replaces Mask R-CNN. |
+| Camera | `observer/camera.py` | Turns heatmaps into a smooth viewport track (minimum hold time, switch hysteresis, pan vs. cut) and writes `.vpd` files the scripts in `src/` can evaluate. |
+
+### Setup
+
+Everything is provided by the flake, including StarCraft 1.16.1's MPQs (unfree):
+
+    nix develop          # python + torch, sc-extract, cmake; sets OPENBW_MPQ_PATH
+    nix build            # just sc-extract
+
+### Usage
+
+Step-by-step instructions (adding replays, extracting, training, running on sauron) are in
+[docs/usage.md](docs/usage.md). In short:
+
+    python -m observer.extract data/replays data/extracted --jobs 6
+    python -m observer.train data/extracted runs/baseline --epochs 8
+    python -m observer.observe runs/baseline/model.pt data/extracted/GAME_438CA8EB --out GAME_438CA8EB.rep.vpd
+    pytest tests
+
+`observer.extract` takes any directory of replays. sc-docker game directories
+(`GAME_*/player_N.rep`) are handled by using one replay per game. Training reports
+**coverage**: the share of the best achievable view mass that the chosen viewport
+captures on held-out games. It's shown next to a rule-based baseline that follows
+units currently in combat.
+
+Extractor output per game (CSV, converted to Parquet by `observer.extract`):
+
+| File | Contents |
+| --- | --- |
+| `meta.json` | Map, players, frame count, extraction settings |
+| `unit_types.json` | BWAPI unit type table: building / worker / flyer flags and combat value |
+| `map.json` | Ground height, walkability and buildability per tile; BWEM areas, chokepoints and bases |
+| `units` | Every non-neutral unit every 8 frames: position, HP, shields, value, combat state, order |
+| `events` | Unit create / destroy / morph / renegade, every frame |
+| `fights` | Groups of opposing units with each side's value and FAP-predicted loss over the next 96 frames |
+
+## Original 2022 pipeline
+
 ## Executing run file (Easy Usage) 
     #!/usr/bin/env bash
     set -ex    
