@@ -21,6 +21,8 @@
 #include <bwem.h>
 #include <nlohmann/json.hpp>
 
+#include <iconv.h>
+
 #include <chrono>
 #include <climits>
 #include <filesystem>
@@ -101,6 +103,58 @@ namespace
     int coord(int value, bool valid)
     {
         return valid ? value : -1;
+    }
+
+    bool isUtf8(const std::string &text)
+    {
+        for (size_t i = 0; i < text.size();)
+        {
+            auto byte = (unsigned char)text[i];
+            size_t length = byte < 0x80 ? 1 : (byte >> 5) == 0x6 ? 2 : (byte >> 4) == 0xE ? 3 : (byte >> 3) == 0x1E ? 4 : 0;
+            if (length == 0 || i + length > text.size()) return false;
+            for (size_t k = 1; k < length; k++)
+            {
+                if (((unsigned char)text[i + k] >> 6) != 0x2) return false;
+            }
+            i += length;
+        }
+        return true;
+    }
+
+    // Map and player names in Korean ladder replays (most of StarData) are CP949, and
+    // nlohmann::json throws on anything that isn't UTF-8 when dumping. Convert them,
+    // replacing whatever still doesn't decode with '?'.
+    std::string toUtf8(const std::string &text)
+    {
+        if (isUtf8(text)) return text;
+
+        std::string result;
+        iconv_t cd = iconv_open("UTF-8", "CP949");
+        if (cd != (iconv_t)-1)
+        {
+            char *in = const_cast<char *>(text.data());
+            size_t inLeft = text.size();
+            std::string buffer(text.size() * 4 + 4, '\0');
+            while (inLeft > 0)
+            {
+                char *out = buffer.data();
+                size_t outLeft = buffer.size();
+                size_t converted = iconv(cd, &in, &inLeft, &out, &outLeft);
+                result.append(buffer.data(), out);
+                if (converted == (size_t)-1 && inLeft > 0)
+                {
+                    result += '?';
+                    in++;
+                    inLeft--;
+                }
+            }
+            iconv_close(cd);
+        }
+        if (isUtf8(result)) return result;
+
+        result.clear();
+        for (char c : text) result += (unsigned char)c < 0x80 ? c : '?';
+        return result;
     }
 
     nlohmann::json pixel(BWAPI::WalkPosition walk)
@@ -227,7 +281,7 @@ namespace
                 auto start = player->getStartLocation();
                 players.push_back({
                                           {"id",    player->getID()},
-                                          {"name",  player->getName()},
+                                          {"name",  toUtf8(player->getName())},
                                           {"race",  player->getRace().getName()},
                                           {"start", {start.x, start.y}},
                                   });
@@ -235,8 +289,8 @@ namespace
 
             nlohmann::json meta = {
                     {"replay",             std::filesystem::absolute(options.replay).string()},
-                    {"map_file",           BWAPI::Broodwar->mapFileName()},
-                    {"map_name",           BWAPI::Broodwar->mapName()},
+                    {"map_file",           toUtf8(BWAPI::Broodwar->mapFileName())},
+                    {"map_name",           toUtf8(BWAPI::Broodwar->mapName())},
                     {"map_hash",           BWAPI::Broodwar->mapHash()},
                     {"map_width_tiles",    BWAPI::Broodwar->mapWidth()},
                     {"map_height_tiles",   BWAPI::Broodwar->mapHeight()},
@@ -432,36 +486,25 @@ namespace
     };
 }
 
-int main(int argc, char **argv)
+int extract(const Options &options)
 {
-    auto options = parseArgs(argc, argv);
-    if (!options)
-    {
-        usage();
-        return 2;
-    }
-    if (!std::filesystem::is_regular_file(options->replay))
-    {
-        std::cerr << "replay not found: " << options->replay << std::endl;
-        return 1;
-    }
-    std::filesystem::create_directories(options->outDir);
+    std::filesystem::create_directories(options.outDir);
 
     auto start = std::chrono::steady_clock::now();
 
     BW::GameOwner gameOwner;
     BWAPI::BroodwarImpl_handle h(gameOwner.getGame());
-    BWAPI::BroodwarImpl.bwgame.setMapFileName(options->replay);
+    BWAPI::BroodwarImpl.bwgame.setMapFileName(options.replay);
     h->createSinglePlayerGame([]()
                               {});
 
     if (!gameOwner.getGame().InReplay())
     {
-        std::cerr << "not a replay: " << options->replay << std::endl;
+        std::cerr << "not a replay: " << options.replay << std::endl;
         return 1;
     }
 
-    ExtractorModule module(*options);
+    ExtractorModule module(options);
     module.afterOnStart = [&]()
     {
         h->setLocalSpeed(0);
@@ -486,6 +529,37 @@ int main(int argc, char **argv)
 
     double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     module.writeMeta(elapsed);
-    std::cerr << "\r  " << options->replay << ": done, " << module.framesPlayed() << " frames in " << elapsed << "s" << std::endl;
+    std::cerr << "\r  " << options.replay << ": done, " << module.framesPlayed() << " frames in " << elapsed << "s" << std::endl;
     return 0;
+}
+
+int main(int argc, char **argv)
+{
+    auto options = parseArgs(argc, argv);
+    if (!options)
+    {
+        usage();
+        return 2;
+    }
+    if (!std::filesystem::is_regular_file(options->replay))
+    {
+        std::cerr << "replay not found: " << options->replay << std::endl;
+        return 1;
+    }
+
+    // Anything escaping here used to abort the process (and dump core) after the whole
+    // replay had been played; fail with a message instead
+    try
+    {
+        return extract(*options);
+    }
+    catch (std::exception &ex)
+    {
+        std::cerr << std::endl << "extraction failed: " << ex.what() << std::endl;
+    }
+    catch (...)
+    {
+        std::cerr << std::endl << "extraction failed: unknown exception" << std::endl;
+    }
+    return 1;
 }
