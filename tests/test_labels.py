@@ -49,6 +49,19 @@ def test_upcoming_deaths_draw_the_target():
     assert cell_of(target) == (900 // CELL_PX, 1500 // CELL_PX)
 
 
+def test_negative_fap_losses_never_make_negative_targets():
+    units = [unit(0, 1, 0, ZERGLING, 100, 100, 50), unit(0, 2, 1, ZERGLING, 1500, 900, 50)]
+    fights = pd.DataFrame([(0, 1500, 900, 400, 0), (0, 100, 100, -300, -200)],
+                          columns=["frame", "x", "y", "loss_a", "loss_b"])
+    game = make_game(units, fights=fights)
+
+    target, magnitude = interest(game, 0, LabelConfig(quiet_threshold=10))
+
+    assert (target >= 0).all() and np.isclose(target.sum(), 1)
+    assert magnitude >= 0
+    assert cell_of(target) == (900 // CELL_PX, 1500 // CELL_PX)
+
+
 def test_quiet_frames_follow_the_armies_not_workers_or_buildings():
     units = [unit(0, 1, 0, ZERGLING, 1200, 400, 500),
              unit(0, 2, 0, DRONE, 200, 200, 5000),

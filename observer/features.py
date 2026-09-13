@@ -24,6 +24,14 @@ N_DYNAMIC = len(DYNAMIC_CHANNELS) * PLAYER_SLOTS
 STATIC_CHANNELS = ("ground_height", "walkable", "buildable", "on_map")
 N_STATIC = len(STATIC_CHANNELS)
 
+# The columns features and labels read, in the smallest types that hold them. A game
+# loaded with every column as int64 takes ~70 MB; the Parquet files keep the rest for
+# exploration.
+UNIT_DTYPES = {"frame": "int32", "player": "int8", "type": "int16", "x": "int16", "y": "int16",
+               "value": "int32", "flying": "bool", "attacking": "bool", "under_attack": "bool"}
+EVENT_DTYPES = {"frame": "int32", "event": "category", "x": "int16", "y": "int16", "value": "int32"}
+FIGHT_DTYPES = {"frame": "int32", "x": "int16", "y": "int16", "loss_a": "int32", "loss_b": "int32"}
+
 
 # eq=False: field-wise equality would compare DataFrames, which raises
 @dataclass(eq=False)
@@ -126,10 +134,18 @@ def pool(grid: np.ndarray) -> np.ndarray:
     return grid.reshape(GRID, CELL_TILES, GRID, CELL_TILES).sum(axis=(1, 3))
 
 
+def fits_grid(meta: dict) -> bool:
+    return meta["map_width_tiles"] <= GRID_TILES and meta["map_height_tiles"] <= GRID_TILES
+
+
+def read_table(path: Path, dtypes: dict) -> pd.DataFrame:
+    return pd.read_parquet(path, columns=list(dtypes)).astype(dtypes)
+
+
 def load_game(path: Path) -> Game:
     path = Path(path)
     meta = json.loads((path / "meta.json").read_text())
-    if meta["map_width_tiles"] > GRID_TILES or meta["map_height_tiles"] > GRID_TILES:
+    if not fits_grid(meta):
         raise ValueError(f"{path.name}: {meta['map_width_tiles']}x{meta['map_height_tiles']} map is larger than {GRID_TILES} tiles")
 
     unit_types = pd.DataFrame.from_dict(json.loads((path / "unit_types.json").read_text()), orient="index")
@@ -142,9 +158,9 @@ def load_game(path: Path) -> Game:
         meta=meta,
         map=json.loads((path / "map.json").read_text()),
         unit_types=unit_types,
-        units=pd.read_parquet(path / "units.parquet"),
-        events=pd.read_parquet(path / "events.parquet"),
-        fights=pd.read_parquet(fights_path) if fights_path.exists() else pd.DataFrame(),
+        units=read_table(path / "units.parquet", UNIT_DTYPES),
+        events=read_table(path / "events.parquet", EVENT_DTYPES),
+        fights=read_table(fights_path, FIGHT_DTYPES) if fights_path.exists() else pd.DataFrame(),
     )
 
 

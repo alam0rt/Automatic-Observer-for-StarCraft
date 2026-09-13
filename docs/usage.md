@@ -97,12 +97,22 @@ next to them and train on the A1000:
 
 ```sh
 S=/srv/share/public/games/StarCraft/stardata
-python -m observer.extract $S/stardata_original_replays $S/extracted --jobs 32
+python -m observer.extract $S/train5k $S/extracted --jobs 32
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
-  python -m observer.train $S/extracted runs/baseline --workers 16 --batch-size 128
+  python -m observer.train $S/extracted $S/runs/train5k --stride 8 --workers 24 --batch-size 128
 ```
 
+`train5k/` is symlinks to 5,000 games from StarData's `train.list`; the full set is in
+`stardata_original_replays/`. Extracted games average ~2.7 MB and ~11 s of CPU each.
 The bot-ladder replays in `/srv/data/bwapi/.scbw/games` can be extracted the same way.
+
+- **Memory:** games are streamed from disk, so RAM is about `--workers` ×
+  `--games-in-memory` games (~10 MB each), not the whole set.
+- **`--stride`:** neighbouring sampled frames are nearly identical, so with thousands of
+  games `--stride 8` loses little and makes an epoch 4× shorter than the default.
+- **`--val-games`:** each epoch evaluates the first 200 held-out games by default.
+- **`--precision`:** `auto` uses bfloat16 on the A1000 and float32 elsewhere. Don't use
+  `fp16` on the T1000 or a GTX 16xx: it gives NaN losses from the first batch.
 
 - Run training inside `tmux` so it survives a disconnect.
 - If the `llama-cpp` service is running, stop it first, or it will compete for GPU
