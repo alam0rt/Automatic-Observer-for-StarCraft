@@ -90,14 +90,19 @@ pytest tests
 
 ## Running on sauron
 
-The same steps work there. Point extraction straight at the ladder's folder and train on
-the A1000:
+The same steps work there. The training set is the
+[StarData](https://github.com/TorchCraft/StarData) replays, unpacked under
+`/srv/share/public/games/StarCraft/stardata/` (the ZFS pool, not the root NVMe). Extract
+next to them and train on the A1000:
 
 ```sh
-python -m observer.extract /srv/data/bwapi/.scbw/games /srv/data/observer/extracted --jobs 32
+S=/srv/share/public/games/StarCraft/stardata
+python -m observer.extract $S/stardata_original_replays $S/extracted --jobs 32
 CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
-  python -m observer.train /srv/data/observer/extracted runs/baseline --workers 16 --batch-size 128
+  python -m observer.train $S/extracted runs/baseline --workers 16 --batch-size 128
 ```
+
+The bot-ladder replays in `/srv/data/bwapi/.scbw/games` can be extracted the same way.
 
 - Run training inside `tmux` so it survives a disconnect.
 - If the `llama-cpp` service is running, stop it first, or it will compete for GPU

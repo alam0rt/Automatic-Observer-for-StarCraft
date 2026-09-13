@@ -4,6 +4,7 @@
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,11 +20,14 @@ def find_replays(root: Path) -> dict[str, Path]:
     """One replay per game, keyed by game name.
 
     sc-docker saves a replay per player (player_0.rep, player_1.rep) in each game
-    directory. They record the same game, so only the first is used.
+    directory. They record the same game, so only the first is used and the game
+    is named after the directory. Any other replay (e.g. StarData, which shards
+    many games into numbered directories) is its own game, named by file stem.
     """
     games = {}
     for replay in sorted(root.rglob("*.rep")):
-        game = replay.parent.name if replay.parent != root else replay.stem
+        per_player = re.fullmatch(r"player_\d+", replay.stem) and replay.parent != root
+        game = replay.parent.name if per_player else replay.stem
         games.setdefault(game, replay)
     return games
 
