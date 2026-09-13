@@ -79,7 +79,39 @@
       };
     };
 
-    python = pkgs.python3.withPackages (ps:
+    # torch-bin links libnvshmem_host.so.3 (via libtorch_nvshmem.so), and
+    # nixpkgs satisfies that with cudaPackages.libnvshmem, which is built from
+    # source for every CUDA capability and is not in any binary cache: hours of
+    # CPU. Use NVIDIA's prebuilt PyPI wheel instead, at the version torch pins
+    # (Requires-Dist: nvidia-nvshmem-cu12==3.4.5).
+    nvshmemBin = pkgs.stdenv.mkDerivation {
+      pname = "nvshmem-bin";
+      version = "3.4.5";
+      src = pkgs.fetchurl {
+        url = "https://files.pythonhosted.org/packages/b5/09/6ea3ea725f82e1e76684f0708bbedd871fc96da89945adeba65c3835a64c/nvidia_nvshmem_cu12-3.4.5-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl";
+        sha256 = "042f2500f24c021db8a06c5eec2539027d57460e1c1a762055a6554f72c369bd";
+      };
+      nativeBuildInputs = [pkgs.unzip pkgs.autoPatchelfHook];
+      buildInputs = [pkgs.stdenv.cc.cc.lib];
+      # Transports (ibverbs, ucx, libfabric, MPI, gdrcopy) are dlopen()ed
+      # plugins that only matter for multi-node runs.
+      autoPatchelfIgnoreMissingDeps = true;
+      unpackPhase = "unzip -q $src";
+      installPhase = ''
+        mkdir -p $out
+        cp -r nvidia/nvshmem/lib $out/lib
+      '';
+    };
+
+    python3 = pkgs.python3.override {
+      packageOverrides = pyFinal: pyPrev: {
+        torch-bin = pyPrev.torch-bin.override {
+          cudaPackages = pkgs.cudaPackages // {libnvshmem = nvshmemBin;};
+        };
+      };
+    };
+
+    python = python3.withPackages (ps:
       with ps; [
         numpy
         pandas
