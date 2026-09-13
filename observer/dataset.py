@@ -8,7 +8,7 @@ import pyarrow.parquet as pq
 import torch
 from torch.utils.data import Dataset, IterableDataset, get_worker_info
 
-from .features import N_DYNAMIC, N_STATIC, Game, fits_grid, load_game
+from .features import N_DYNAMIC, N_STATIC, Game, fits_grid, load_game, played_out
 from .labels import LabelConfig, interest
 
 
@@ -69,15 +69,20 @@ class GameEntry:
 
 
 def index_games(root: Path) -> list[GameEntry]:
-    """Every extracted game under root that load_game accepts, without loading any."""
+    """Every usable extracted game under root, without loading any.
+
+    Skips maps larger than the grid, games that desynced in OpenBW, and games with no units.
+    """
     entries = []
     for path in sorted(Path(root).iterdir()):
         meta_path = path / "meta.json"
         if not meta_path.exists():
             continue
         meta = json.loads(meta_path.read_text())
+        if not (fits_grid(meta) and played_out(meta)):
+            continue
         last = last_unit_frame(path / "units.parquet")
-        if fits_grid(meta) and last is not None:
+        if last is not None:
             entries.append(GameEntry(path, last // meta["interval"] + 1))
     return entries
 

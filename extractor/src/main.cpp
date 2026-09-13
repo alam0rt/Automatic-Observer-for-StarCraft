@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <set>
 #include <unordered_map>
@@ -195,10 +196,12 @@ namespace
             trackUnits(frame);
             if (frame % options.interval != 0) return;
 
+            std::map<int, int> unitsPerPlayer;
             for (auto unit : BWAPI::Broodwar->getAllUnits())
             {
                 if (!unit->exists() || unit->getPlayer()->isNeutral()) continue;
                 playersSeen.insert(unit->getPlayer());
+                unitsPerPlayer[unit->getPlayer()->getID()]++;
 
                 auto pos = unit->getPosition();
                 auto order = unit->getOrderTargetPosition();
@@ -221,6 +224,10 @@ namespace
                       << unit->getOrder().getID() << ','
                       << coord(order.x, order.isValid()) << ','
                       << coord(order.y, order.isValid()) << '\n';
+            }
+            for (auto &[player, count] : unitsPerPlayer)
+            {
+                peakUnits[player] = std::max(peakUnits[player], count);
             }
 
             if (fightFinder)
@@ -284,6 +291,7 @@ namespace
                                           {"name",  toUtf8(player->getName())},
                                           {"race",  player->getRace().getName()},
                                           {"start", {start.x, start.y}},
+                                          {"peak_units", peakUnits[player->getID()]},
                                   });
             }
 
@@ -300,6 +308,9 @@ namespace
                     {"sim_frames",         options.fights ? options.simFrames : 0},
                     {"link_radius",        options.fights ? options.linkRadius : 0},
                     {"players",            players},
+                    // When OpenBW desyncs from a replay, both sides stall with their starting
+                    // units: a handful of creates over the whole game. See observer.features.played_out
+                    {"event_counts",       eventCounts},
                     {"elapsed_seconds",    elapsedSeconds},
             };
             std::ofstream(options.outDir / "meta.json") << meta.dump(2) << '\n';
@@ -325,6 +336,8 @@ namespace
         std::unique_ptr<FightFinder> fightFinder;
         std::set<BWAPI::Player> playersSeen;
         std::unordered_map<int, TrackedUnit> tracked;
+        std::map<std::string, int> eventCounts;
+        std::map<int, int> peakUnits;  // most units a player had at once, by player ID
         int lastFrame = 0;
 
         // OpenBW's BWAPI never sets isUnderAttack (UnitUpdate.cpp hard-codes
@@ -364,6 +377,7 @@ namespace
         void event(const char *name, BWAPI::Unit unit)
         {
             if (unit->getPlayer()->isNeutral()) return;
+            eventCounts[name]++;
 
             auto pos = unit->getPosition();
             events << BWAPI::Broodwar->getFrameCount() << ','

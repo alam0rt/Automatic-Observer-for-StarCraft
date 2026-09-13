@@ -49,7 +49,7 @@ Extractor output per game (CSV, converted to Parquet by `observer.extract`):
 
 | File | Contents |
 | --- | --- |
-| `meta.json` | Map, players, frame count, extraction settings |
+| `meta.json` | Map, players (with peak unit count), frame count, event counts, extraction settings. Training skips games whose event counts show OpenBW desynced from the replay |
 | `unit_types.json` | BWAPI unit type table: building / worker / flyer flags and combat value |
 | `map.json` | Ground height, walkability and buildability per tile; BWEM areas, chokepoints and bases |
 | `units` | Every non-neutral unit every 8 frames: position, HP, shields, value, combat state, order |

@@ -138,6 +138,18 @@ def fits_grid(meta: dict) -> bool:
     return meta["map_width_tiles"] <= GRID_TILES and meta["map_height_tiles"] <= GRID_TILES
 
 
+# When OpenBW desyncs from a replay, both sides stall with their starting units and
+# nothing develops: ~1-2 units created per game minute, against 19+ in real games.
+MIN_CREATES_PER_MINUTE = 5
+FRAMES_PER_MINUTE = 24 * 60
+
+
+def played_out(meta: dict) -> bool:
+    """False for games that desynced in OpenBW, whose units and fights are meaningless."""
+    minutes = meta["last_frame"] / FRAMES_PER_MINUTE
+    return meta["event_counts"].get("create", 0) >= MIN_CREATES_PER_MINUTE * minutes
+
+
 def read_table(path: Path, dtypes: dict) -> pd.DataFrame:
     return pd.read_parquet(path, columns=list(dtypes)).astype(dtypes)
 

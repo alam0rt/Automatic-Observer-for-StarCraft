@@ -97,7 +97,10 @@ def main(argv=None):
     labels = LabelConfig()
 
     # Games are streamed from disk: thousands of them don't fit in memory at once.
-    train_games, val_games = split_games(index_games(args.data))
+    entries = index_games(args.data)
+    extracted = sum(1 for p in args.data.iterdir() if (p / "meta.json").exists())
+    print(f"{len(entries)} of {extracted} extracted games usable (skipped: desynced, map too large, or no units)")
+    train_games, val_games = split_games(entries)
     if args.val_games:
         val_games = val_games[:args.val_games]
     print(f"{len(train_games)} training games, {len(val_games)} validation games, device {device}, "

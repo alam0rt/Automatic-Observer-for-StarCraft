@@ -15,14 +15,17 @@ UNIT_COLUMNS = ["frame", "id", "player", "type", "x", "y", "hp", "shields", "ene
 EVENT_COLUMNS = ["frame", "event", "id", "player", "type", "x", "y", "value"]
 
 
-def write_game(root, name, frames, interval=8, size=64, offset=0):
+def write_game(root, name, frames, interval=8, size=64, offset=0, creates=100):
     """An extracted game on disk, laid out as sc-extract + observer.extract write it.
 
     One zergling walks a cell per sampled frame, so every sample's features differ.
     """
     path = root / name
     path.mkdir()
-    (path / "meta.json").write_text(json.dumps({"map_width_tiles": size, "map_height_tiles": size, "interval": interval}))
+    (path / "meta.json").write_text(json.dumps({
+        "map_width_tiles": size, "map_height_tiles": size, "interval": interval,
+        "last_frame": frames * interval, "event_counts": {"create": creates, "destroy": 1},
+    }))
     (path / "map.json").write_text(json.dumps(
         {"ground_height": [0] * size * size, "walkable_minitiles": [16] * size * size, "buildable": [1] * size * size}))
     (path / "unit_types.json").write_text(json.dumps({str(ZERGLING): {"building": False, "worker": False}}))
@@ -52,6 +55,14 @@ def test_index_matches_loaded_games_and_skips_oversized_maps(tmp_path):
 
     assert [e.name for e in entries] == ["small"]
     assert entries[0].frames == len(load_game(entries[0].path).frames)
+
+
+def test_index_skips_games_that_desynced(tmp_path):
+    # 20 minutes with the starting units only, like OpenBW desyncs in StarData
+    write_game(tmp_path, "desynced", 3600, creates=33)
+    write_game(tmp_path, "real", 3600, creates=900)
+
+    assert [e.name for e in index_games(tmp_path)] == ["real"]
 
 
 def test_loaded_games_keep_only_small_columns(tmp_path):
