@@ -55,6 +55,12 @@
         grep -rlE 'std::(unique|shared)_ptr' 3rdparty/openbw/bwapi/bwapi/include | while read -r header; do
           grep -q '#include <memory>' "$header" || sed -i '1i #include <memory>' "$header"
         done
+
+        # FAP "repairs" bunkers by 680/256 HP every frame with no cap, unlike its Zerg
+        # and shield regeneration, so a damaged bunker ends a simulation above full
+        # health and fights report negative losses.
+        substituteInPlace 3rdparty/FAP/include/FAP.hpp \
+          --replace-fail 'fu.health += 680;' 'fu.health = fu.health + 680 < fu.maxHealth ? fu.health + 680 : fu.maxHealth;'
       '';
     };
 

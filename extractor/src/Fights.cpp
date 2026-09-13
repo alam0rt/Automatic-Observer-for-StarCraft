@@ -181,12 +181,35 @@ namespace
                 .setData({});
     }
 
-    int score(const std::vector<FAP::FAPUnit<>> &units)
+    // Value per unit ID. A bunker that dies in the simulation becomes marines that keep
+    // its ID, so they are summed back into it.
+    std::unordered_map<int, int> valueById(const std::vector<FAP::FAPUnit<>> &units)
     {
-        int result = 0;
+        std::unordered_map<int, int> result;
         for (auto &unit : units)
         {
-            result += UnitValue::scaled(unit.unitType, unit.health, unit.shields, unit.maxHealth, unit.maxShields);
+            result[unit.id] += UnitValue::scaled(unit.unitType, unit.health, unit.shields, unit.maxHealth, unit.maxShields);
+        }
+        return result;
+    }
+
+    int total(const std::unordered_map<int, int> &values)
+    {
+        int result = 0;
+        for (auto &[id, value] : values) result += value;
+        return result;
+    }
+
+    // Value destroyed, counted per unit and only where a unit's value went down. FAP also
+    // simulates shield and HP regeneration, medic healing and bunker repair; netting those
+    // against a side's damage made its total rise and reported negative losses.
+    int lost(const std::unordered_map<int, int> &before, const std::unordered_map<int, int> &after)
+    {
+        int result = 0;
+        for (auto &[id, value] : before)
+        {
+            auto it = after.find(id);
+            result += std::max(0, value - (it == after.end() ? 0 : it->second));
         }
         return result;
     }
@@ -350,14 +373,16 @@ Fight FightFinder::simulate(const std::vector<BWAPI::Unit> &group)
     fight.y = (int)(weightedY / totalWeight);
 
     auto state = sim.getState();
-    fight.valueA = score(*state.first);
-    fight.valueB = score(*state.second);
+    auto beforeA = valueById(*state.first);
+    auto beforeB = valueById(*state.second);
+    fight.valueA = total(beforeA);
+    fight.valueB = total(beforeB);
 
     sim.simulate(simFrames);
 
     state = sim.getState();
-    fight.lossA = fight.valueA - score(*state.first);
-    fight.lossB = fight.valueB - score(*state.second);
+    fight.lossA = lost(beforeA, valueById(*state.first));
+    fight.lossB = lost(beforeB, valueById(*state.second));
 
     return fight;
 }

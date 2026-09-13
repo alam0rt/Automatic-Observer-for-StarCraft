@@ -52,9 +52,9 @@ def interest(game: Game, index: int, config: LabelConfig = LabelConfig()) -> tup
 
     if len(game.fights):
         fights = game.fights[game.fights["frame"] == frame]
-        # FAP reports small negative losses (regeneration, healing) for some fights. A
-        # negative cell makes the target not a distribution and the loss unbounded below,
-        # which drove training to NaN.
+        # sc-extract counts losses per unit so they can't be negative, but games extracted
+        # before that netted FAP's regeneration and healing against damage. A negative
+        # cell would make the target not a distribution.
         loss = (fights["loss_a"].clip(lower=0) + fights["loss_b"].clip(lower=0)).to_numpy()
         heat += config.fap_weight * _splat(fights["x"], fights["y"], loss)
 

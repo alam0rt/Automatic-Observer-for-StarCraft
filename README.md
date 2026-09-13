@@ -53,7 +53,7 @@ Extractor output per game (CSV, converted to Parquet by `observer.extract`):
 | `unit_types.json` | BWAPI unit type table: building / worker / flyer flags and combat value |
 | `map.json` | Ground height, walkability and buildability per tile; BWEM areas, chokepoints and bases |
 | `units` | Every non-neutral unit every 8 frames: position, HP, shields, value, combat state, order |
-| `events` | Unit create / destroy / morph / renegade, every frame |
+| `events` | Unit create / destroy / merge / morph / renegade, every frame. `merge` is a templar absorbed into an archon, which BWAPI reports as destroyed |
 | `fights` | Groups of opposing units with each side's value and FAP-predicted loss over the next 96 frames |
 
 ## Original 2022 pipeline

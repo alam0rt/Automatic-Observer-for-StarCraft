@@ -8,7 +8,8 @@
 //   unit_types.json  BWAPI unit type table (name, race, building, worker, flyer, value)
 //   map.json    tile grids (ground height, walkability, buildability) and BWEM areas, chokepoints and bases
 //   units.csv   every non-neutral unit, every --interval frames
-//   events.csv  unit create / destroy / morph / renegade events, every frame
+//   events.csv  unit create / destroy / merge / morph / renegade events, every frame
+//               (merge: a templar absorbed into an archon, which BWAPI reports as destroyed)
 //   fights.csv  groups of opposing units with FAP's predicted value loss over --sim-frames
 
 #include "Fights.h"
@@ -21,11 +22,13 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <climits>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <set>
+#include <unordered_map>
 
 namespace
 {
@@ -135,6 +138,7 @@ namespace
         {
             int frame = BWAPI::Broodwar->getFrameCount();
             lastFrame = frame;
+            trackUnits(frame);
             if (frame % options.interval != 0) return;
 
             for (auto unit : BWAPI::Broodwar->getAllUnits())
@@ -158,7 +162,7 @@ namespace
                       << unit->isBurrowed() << ','
                       << unit->isCloaked() << ','
                       << unit->isAttacking() << ','
-                      << unit->isUnderAttack() << ','
+                      << underAttack(unit, frame) << ','
                       << unit->isCompleted() << ','
                       << unit->getOrder().getID() << ','
                       << coord(order.x, order.isValid()) << ','
@@ -192,7 +196,12 @@ namespace
 
         void onUnitDestroy(BWAPI::Unit unit) override
         {
-            event("destroy", unit);
+            // Unit events are handled before onFrame, so this is the templar's state on
+            // the frame before it disappeared
+            auto it = tracked.find(unit->getID());
+            bool merged = it != tracked.end() && it->second.merging;
+            event(merged ? "merge" : "destroy", unit);
+            if (it != tracked.end()) tracked.erase(it);
         }
 
         void onUnitMorph(BWAPI::Unit unit) override
@@ -243,13 +252,60 @@ namespace
         }
 
     private:
+        // A unit counts as under attack for this many frames after it last lost hit
+        // points or shields (one game second)
+        static constexpr int underAttackFrames = 24;
+
+        struct TrackedUnit
+        {
+            BWAPI::UnitType type;
+            int hitPointsAndShields;
+            int lastDamagedFrame = INT_MIN / 2;
+            bool merging = false;
+        };
+
         Options options;
         std::ofstream units;
         std::ofstream events;
         std::ofstream fights;
         std::unique_ptr<FightFinder> fightFinder;
         std::set<BWAPI::Player> playersSeen;
+        std::unordered_map<int, TrackedUnit> tracked;
         int lastFrame = 0;
+
+        // OpenBW's BWAPI never sets isUnderAttack (UnitUpdate.cpp hard-codes
+        // recentlyAttacked = false), so watch every unit's hit points and shields each
+        // frame instead. Also remembers which templars are merging into archons.
+        void trackUnits(int frame)
+        {
+            for (auto unit : BWAPI::Broodwar->getAllUnits())
+            {
+                if (!unit->exists() || unit->getPlayer()->isNeutral()) continue;
+
+                auto type = unit->getType();
+                int current = unit->getHitPoints() + unit->getShields();
+                auto [it, inserted] = tracked.try_emplace(unit->getID(), TrackedUnit{type, current});
+                auto &state = it->second;
+
+                // Terran buildings below a third of their hit points burn down on their own
+                bool burning = type.getRace() == BWAPI::Races::Terran && type.isBuilding()
+                               && unit->getHitPoints() < type.maxHitPoints() / 3;
+                if (!inserted && state.type == type && current < state.hitPointsAndShields && !burning)
+                {
+                    state.lastDamagedFrame = frame;
+                }
+
+                state.type = type;
+                state.hitPointsAndShields = current;
+                state.merging = unit->getOrder() == BWAPI::Orders::ArchonWarp || unit->getOrder() == BWAPI::Orders::DarkArchonMeld;
+            }
+        }
+
+        bool underAttack(BWAPI::Unit unit, int frame) const
+        {
+            auto it = tracked.find(unit->getID());
+            return it != tracked.end() && frame - it->second.lastDamagedFrame <= underAttackFrames;
+        }
 
         void event(const char *name, BWAPI::Unit unit)
         {
